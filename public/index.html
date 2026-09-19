@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Simple WebRTC Chat (Same Wi‑Fi)</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    video { width: 45%; margin: 5px; background: #000; }
+    #status { margin-top: 10px; color: #555; }
+  </style>
+</head>
+<body>
+  <h2>Simple WebRTC Chat (Same Wi‑Fi)</h2>
+  <video id="localVideo" autoplay muted></video>
+  <video id="remoteVideo" autoplay></video>
+  <div id="status">Initializing...</div>
+
+  <!-- Socket.io client library (served by the server) -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+
+    const configuration = {
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    };
+    const pc = new RTCPeerConnection(configuration);
+    const localVideo = document.getElementById('localVideo');
+    const remoteVideo = document.getElementById('remoteVideo');
+    const statusDiv = document.getElementById('status');
+
+    // Get local media (camera + mic)
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      .then(stream => {
+        statusDiv.textContent = '📹 Local media acquired';
+        localVideo.srcObject = stream;
+        stream.getTracks().forEach(track => pc.addTrack(track, stream));
+      })
+      .catch(err => {
+        statusDiv.textContent = '❌ Error accessing media devices';
+        console.error(err);
+      });
+
+    // When remote track arrives, show it
+    pc.ontrack = event => {
+      remoteVideo.srcObject = event.streams[0];
+    };
+
+    // Send ICE candidates to the other peer via signalling server
+    pc.onicecandidate = event => {
+      if (event.candidate) {
+        socket.emit('signal', { type: 'candidate', candidate: event.candidate });
+      }
+    };
+
+    // Handle incoming signalling messages
+    socket.on('signal', async data => {
+      if (data.from === socket.id) return; // ignore own messages
+
+      switch (data.type) {
+        case 'offer':
+          await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          socket.emit('signal', { type: 'answer', answer });
+          break;
+
+        case 'answer':
+          await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+          break;
+
+        case 'candidate':
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+          } catch (e) {
+            console.error('Error adding received ICE candidate', e);
+          }
+          break;
+      }
+    });
+
+    // Simple heuristic: after a short delay, the first client creates an offer
+    setTimeout(async () => {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socket.emit('signal', { type: 'offer', offer });
+    }, 3000);
+  </script>
+</body>
+</html>
