@@ -4,79 +4,13 @@
   <meta charset="UTF-8">
   <title>Simple WebRTC Chat (Same Wi‑Fi)</title>
   <style>
-    /* Dark‑mode base */
-    body {
-      font-family: Arial, sans-serif;
-      margin: 20px;
-      background-color: #121212;
-      color: #e0e0e0;
-    }
-    h2, h3 {
-      color: #fafafa;
-    }
-    video {
-      width: 45%;
-      margin: 5px;
-      background: #000;
-      border: 2px solid #444;
-    }
-    #status {
-      margin-top: 10px;
-      color: #bbbbbb;
-    }
-    #log {
-      margin-top: 15px;
-      max-height: 150px;
-      overflow-y: auto;
-      background: #1e1e1e;
-      padding: 10px;
-      border: 1px solid #333;
-      font-size: 0.9em;
-      color: #cfcfcf;
-    }
-    .log-entry {
-      margin-bottom: 4px;
-    }
-    .latency {
-      margin-top: 10px;
-      color: #90ee90;
-    }
-    #chatContainer {
-      margin-top: 20px;
-    }
-    #chatMessages {
-      list-style: none;
-      padding: 5px;
-      max-height: 150px;
-      overflow-y: auto;
-      background: #2a2a2a;
-      border: 1px solid #444;
-      color: #e0e0e0;
-    }
-    #chatMessages li {
-      margin-bottom: 4px;
-    }
-    #chatForm {
-      display: flex;
-      margin-top: 5px;
-    }
-    #chatInput {
-      flex: 1;
-      padding: 5px;
-      background: #333;
-      border: 1px solid #555;
-      color: #e0e0e0;
-    }
-    #sendBtn {
-      padding: 5px 10px;
-      background: #555;
-      border: 1px solid #777;
-      color: #fafafa;
-      cursor: pointer;
-    }
-    #sendBtn:hover {
-      background: #666;
-    }
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    video { width: 45%; margin: 5px; background: #000; }
+    #status { margin-top: 10px; color: #555; }
+    #chat { margin-top: 15px; }
+    #messages { border: 1px solid #ccc; height: 150px; overflow-y: auto; padding: 5px; }
+    #inputBox { width: 80%; }
+    #sendBtn { width: 18%; }
   </style>
 </head>
 <body>
@@ -84,6 +18,12 @@
   <video id="localVideo" autoplay muted></video>
   <video id="remoteVideo" autoplay></video>
   <div id="status">Initializing...</div>
+
+  <div id="chat">
+    <div id="messages"></div>
+    <input type="text" id="inputBox" placeholder="Type a message..." />
+    <button id="sendBtn">Send</button>
+  </div>
 
   <!-- Socket.io client library (served by the server) -->
   <script src="/socket.io/socket.io.js"></script>
@@ -97,159 +37,152 @@
     const localVideo = document.getElementById('localVideo');
     const remoteVideo = document.getElementById('remoteVideo');
     const statusDiv = document.getElementById('status');
+    const messagesDiv = document.getElementById('messages');
+    const inputBox = document.getElementById('inputBox');
+    const sendBtn = document.getElementById('sendBtn');
 
-    // ----- UI elements for logs, latency & chat -----
-    const logDiv = document.createElement('div');
-    logDiv.id = 'log';
-    document.body.appendChild(logDiv);
+    let dataChannel = null;
+    let isInitiator = false; // true for the peer that creates the first offer
 
-    const latencyDiv = document.createElement('div');
-    latencyDiv.className = 'latency';
-    document.body.appendChild(latencyDiv);
-
-    const chatContainer = document.createElement('div');
-    chatContainer.id = 'chatContainer';
-    chatContainer.innerHTML = `
-      <h3>Chat</h3>
-      <ul id="chatMessages"></ul>
-      <form id="chatForm">
-        <input id="chatInput" autocomplete="off" placeholder="Type a message..." />
-        <button id="sendBtn" type="submit">Send</button>
-      </form>
-    `;
-    document.body.appendChild(chatContainer);
-
-    const chatMessages = document.getElementById('chatMessages');
-    const chatForm = document.getElementById('chatForm');
-    const chatInput = document.getElementById('chatInput');
-
-    // Helper to append log entries
-    function addLog(message) {
-      const entry = document.createElement('div');
-      entry.className = 'log-entry';
-      entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
-      logDiv.appendChild(entry);
-      logDiv.scrollTop = logDiv.scrollHeight;
-    }
-
-    // Helper to display chat messages
-    function addChatMessage(from, text) {
-      const li = document.createElement('li');
-      li.textContent = `${from === socket.id ? 'Me' : from}: ${text}`;
-      chatMessages.appendChild(li);
-      chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
-
-    // ----- Media handling -----
+    // ---------- Media ----------
     navigator.mediaDevices.getUserMedia({ video: true, audio: true })
       .then(stream => {
         statusDiv.textContent = '📹 Local media acquired';
-        addLog('Local media stream obtained.');
         localVideo.srcObject = stream;
         stream.getTracks().forEach(track => pc.addTrack(track, stream));
       })
       .catch(err => {
         statusDiv.textContent = '❌ Error accessing media devices';
-        addLog('Error accessing media devices: ' + err);
         console.error(err);
       });
 
-    // Remote track handling
+    // ---------- Remote Track ----------
     pc.ontrack = event => {
       remoteVideo.srcObject = event.streams[0];
-      addLog('Remote track received.');
     };
 
-    // ICE candidate handling
+    // ---------- ICE Candidates ----------
     pc.onicecandidate = event => {
       if (event.candidate) {
-        socket.emit('signal', { type: 'candidate', candidate: event.candidate });
-        addLog('Sent ICE candidate.');
+        socket.emit('signal', {
+          to: remotePeerId,
+          type: 'candidate',
+          payload: event.candidate
+        });
       }
     };
 
-    // Connection state monitoring
-    pc.onconnectionstatechange = () => {
-      addLog('PeerConnection state: ' + pc.connectionState);
-      if (pc.connectionState === 'connected') {
-        statusDiv.textContent = '✅ Connection established';
-      }
+    // ---------- Data Channel ----------
+    pc.ondatachannel = event => {
+      dataChannel = event.channel;
+      setupDataChannel();
     };
 
-    // ----- Signalling -----
+    function createDataChannel() {
+      dataChannel = pc.createDataChannel('chat');
+      setupDataChannel();
+    }
+
+    function setupDataChannel() {
+      dataChannel.onopen = () => {
+        console.log('💬 Data channel opened');
+        appendMessage('--- Data channel opened ---');
+      };
+      dataChannel.onmessage = e => {
+        appendMessage(`Peer: ${e.data}`);
+      };
+      dataChannel.onclose = () => {
+        console.log('💬 Data channel closed');
+        appendMessage('--- Data channel closed ---');
+      };
+    }
+
+    function appendMessage(msg) {
+      const p = document.createElement('p');
+      p.textContent = msg;
+      messagesDiv.appendChild(p);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    // ---------- Signalling ----------
+    let remotePeerId = null; // will hold the id of the peer we are talking to
+
+    socket.on('ready', data => {
+      // data.peers is an array of peer ids that are already online
+      if (data.peers.length > 0) {
+        // Connect to the first peer in the list
+        remotePeerId = data.peers[0];
+        isInitiator = true;
+        createDataChannel(); // initiator creates the data channel
+        startOffer();
+      } else {
+        // No other peers yet – wait for someone to join
+        statusDiv.textContent = '⏳ Waiting for a peer...';
+      }
+    });
+
     socket.on('signal', async data => {
       if (data.from === socket.id) return; // ignore own messages
-      addLog(`Signal received: ${data.type} from ${data.from}`);
+      remotePeerId = data.from; // remember who sent this
 
       switch (data.type) {
         case 'offer':
-          await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-          addLog('Remote offer set.');
+          await pc.setRemoteDescription(new RTCSessionDescription(data.payload));
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
-          socket.emit('signal', { type: 'answer', answer });
-          addLog('Answer sent.');
+          socket.emit('signal', {
+            to: remotePeerId,
+            type: 'answer',
+            payload: answer
+          });
           break;
 
         case 'answer':
-          await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-          addLog('Remote answer set.');
+          await pc.setRemoteDescription(new RTCSessionDescription(data.payload));
           break;
 
         case 'candidate':
           try {
-            await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-            addLog('Remote ICE candidate added.');
+            await pc.addIceCandidate(new RTCIceCandidate(data.payload));
           } catch (e) {
             console.error('Error adding received ICE candidate', e);
-            addLog('Error adding ICE candidate: ' + e);
           }
           break;
       }
     });
 
-    // First client creates an offer after a short delay
-    setTimeout(async () => {
+    socket.on('peer-left', data => {
+      if (data.id === remotePeerId) {
+        statusDiv.textContent = '⚠️ Peer disconnected';
+        remotePeerId = null;
+        // Close existing connection gracefully
+        if (pc) pc.close();
+      }
+    });
+
+    async function startOffer() {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      socket.emit('signal', { type: 'offer', offer });
-      addLog('Offer created and sent.');
-    }, 3000);
-
-    // ----- Latency measurement -----
-    function sendPing() {
-      const now = Date.now();
-      socket.emit('ping', { time: now });
+      socket.emit('signal', {
+        to: remotePeerId,
+        type: 'offer',
+        payload: offer
+      });
     }
 
-    socket.on('pong', data => {
-      const latency = Date.now() - data.time;
-      latencyDiv.textContent = `Current latency: ${latency} ms`;
-      addLog(`Latency measured: ${latency} ms`);
+    // ---------- Chat UI ----------
+    sendBtn.addEventListener('click', sendMessage);
+    inputBox.addEventListener('keypress', e => {
+      if (e.key === 'Enter') sendMessage();
     });
 
-    setInterval(sendPing, 5000);
-    socket.on('connect', () => {
-      addLog('Socket.io connected, id: ' + socket.id);
-      sendPing();
-    });
-
-    // ----- Chat handling -----
-    socket.on('chat', data => {
-      addChatMessage(data.from, data.message);
-      addLog(`Chat message received from ${data.from}`);
-    });
-
-    chatForm.addEventListener('submit', e => {
-      e.preventDefault();
-      const msg = chatInput.value.trim();
-      if (!msg) return;
-      // Send to peers via signalling server
-      socket.emit('chat', { message: msg });
-      addChatMessage(socket.id, msg);
-      addLog('Chat message sent.');
-      chatInput.value = '';
-    });
+    function sendMessage() {
+      const msg = inputBox.value.trim();
+      if (!msg || !dataChannel || dataChannel.readyState !== 'open') return;
+      dataChannel.send(msg);
+      appendMessage(`You: ${msg}`);
+      inputBox.value = '';
+    }
   </script>
 </body>
 </html>
