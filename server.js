@@ -6,9 +6,9 @@ const path = require('path');
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-  // Reduce default ping interval to keep connection health tight (helps latency)
-  pingInterval: 10000,
-  pingTimeout: 5000,
+  // Reduce ping intervals to keep connection health tight (helps latency)
+  pingInterval: 5000,   // send a ping every 5 seconds
+  pingTimeout: 2000,    // consider the client dead after 2 seconds without pong
 });
 
 const PORT = process.env.PORT || 3000;
@@ -20,13 +20,21 @@ app.use(express.static(path.join(__dirname, 'public')));
 io.on('connection', (socket) => {
   console.log('🟢 New client connected:', socket.id);
 
-  // Forward any signalling data (offer, answer, ICE candidates) to all other peers
+  // Forward signalling data (offer, answer, ICE candidates) to other peers
   socket.on('signal', (data) => {
     console.log(`🔄 Signal (${data.type}) from ${socket.id}`);
-    // Broadcast to every socket except the sender
     socket.broadcast.emit('signal', {
       from: socket.id,
       ...data,
+    });
+  });
+
+  // Forward chat messages to other peers
+  socket.on('chat', (payload) => {
+    console.log(`💬 Chat from ${socket.id}: ${payload.message}`);
+    socket.broadcast.emit('chat', {
+      from: socket.id,
+      message: payload.message,
     });
   });
 

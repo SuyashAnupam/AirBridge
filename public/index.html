@@ -10,6 +10,12 @@
     #log { margin-top: 15px; max-height: 150px; overflow-y: auto; background:#f9f9f9; padding:10px; border:1px solid #ddd; font-size:0.9em; }
     .log-entry { margin-bottom:4px; }
     .latency { margin-top:10px; color:#006400; }
+    #chatContainer { margin-top:20px; }
+    #chatMessages { list-style:none; padding:0; max-height:150px; overflow-y:auto; background:#eef; padding:5px; border:1px solid #ccc; }
+    #chatMessages li { margin-bottom:4px; }
+    #chatForm { display:flex; margin-top:5px; }
+    #chatInput { flex:1; padding:5px; }
+    #sendBtn { padding:5px 10px; }
   </style>
 </head>
 <body>
@@ -30,12 +36,31 @@
     const localVideo = document.getElementById('localVideo');
     const remoteVideo = document.getElementById('remoteVideo');
     const statusDiv = document.getElementById('status');
+
+    // ----- UI elements for logs, latency & chat -----
     const logDiv = document.createElement('div');
     logDiv.id = 'log';
     document.body.appendChild(logDiv);
+
     const latencyDiv = document.createElement('div');
     latencyDiv.className = 'latency';
     document.body.appendChild(latencyDiv);
+
+    const chatContainer = document.createElement('div');
+    chatContainer.id = 'chatContainer';
+    chatContainer.innerHTML = `
+      <h3>Chat</h3>
+      <ul id="chatMessages"></ul>
+      <form id="chatForm">
+        <input id="chatInput" autocomplete="off" placeholder="Type a message..." />
+        <button id="sendBtn" type="submit">Send</button>
+      </form>
+    `;
+    document.body.appendChild(chatContainer);
+
+    const chatMessages = document.getElementById('chatMessages');
+    const chatForm = document.getElementById('chatForm');
+    const chatInput = document.getElementById('chatInput');
 
     // Helper to append log entries
     function addLog(message) {
@@ -43,11 +68,18 @@
       entry.className = 'log-entry';
       entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
       logDiv.appendChild(entry);
-      // Auto‑scroll to bottom
       logDiv.scrollTop = logDiv.scrollHeight;
     }
 
-    // Get local media (camera + mic)
+    // Helper to display chat messages
+    function addChatMessage(from, text) {
+      const li = document.createElement('li');
+      li.textContent = `${from === socket.id ? 'Me' : from}: ${text}`;
+      chatMessages.appendChild(li);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    // ----- Media handling -----
     navigator.mediaDevices.getUserMedia({ video: true, audio: true })
       .then(stream => {
         statusDiv.textContent = '📹 Local media acquired';
@@ -61,13 +93,13 @@
         console.error(err);
       });
 
-    // When remote track arrives, show it
+    // Remote track handling
     pc.ontrack = event => {
       remoteVideo.srcObject = event.streams[0];
       addLog('Remote track received.');
     };
 
-    // Send ICE candidates to the other peer via signalling server
+    // ICE candidate handling
     pc.onicecandidate = event => {
       if (event.candidate) {
         socket.emit('signal', { type: 'candidate', candidate: event.candidate });
@@ -75,7 +107,7 @@
       }
     };
 
-    // Connection state monitoring (helps to know when connection is satisfied)
+    // Connection state monitoring
     pc.onconnectionstatechange = () => {
       addLog('PeerConnection state: ' + pc.connectionState);
       if (pc.connectionState === 'connected') {
@@ -83,10 +115,9 @@
       }
     };
 
-    // Handle incoming signalling messages
+    // ----- Signalling -----
     socket.on('signal', async data => {
       if (data.from === socket.id) return; // ignore own messages
-
       addLog(`Signal received: ${data.type} from ${data.from}`);
 
       switch (data.type) {
@@ -116,7 +147,7 @@
       }
     });
 
-    // Simple heuristic: after a short delay, the first client creates an offer
+    // First client creates an offer after a short delay
     setTimeout(async () => {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
@@ -124,8 +155,7 @@
       addLog('Offer created and sent.');
     }, 3000);
 
-    // ---------- Latency measurement ----------
-    // Send a ping every 5 seconds; server will reply with the same timestamp.
+    // ----- Latency measurement -----
     function sendPing() {
       const now = Date.now();
       socket.emit('ping', { time: now });
@@ -137,12 +167,27 @@
       addLog(`Latency measured: ${latency} ms`);
     });
 
-    // Start the ping loop
     setInterval(sendPing, 5000);
-    // Initial ping immediately after connection
     socket.on('connect', () => {
       addLog('Socket.io connected, id: ' + socket.id);
       sendPing();
+    });
+
+    // ----- Chat handling -----
+    socket.on('chat', data => {
+      addChatMessage(data.from, data.message);
+      addLog(`Chat message received from ${data.from}`);
+    });
+
+    chatForm.addEventListener('submit', e => {
+      e.preventDefault();
+      const msg = chatInput.value.trim();
+      if (!msg) return;
+      // Send to peers via signalling server
+      socket.emit('chat', { message: msg });
+      addChatMessage(socket.id, msg);
+      addLog('Chat message sent.');
+      chatInput.value = '';
     });
   </script>
 </body>
