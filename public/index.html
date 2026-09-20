@@ -7,6 +7,9 @@
     body { font-family: Arial, sans-serif; margin: 20px; }
     video { width: 45%; margin: 5px; background: #000; }
     #status { margin-top: 10px; color: #555; }
+    #log { margin-top: 15px; max-height: 150px; overflow-y: auto; background:#f9f9f9; padding:10px; border:1px solid #ddd; font-size:0.9em; }
+    .log-entry { margin-bottom:4px; }
+    .latency { margin-top:10px; color:#006400; }
   </style>
 </head>
 <body>
@@ -27,28 +30,56 @@
     const localVideo = document.getElementById('localVideo');
     const remoteVideo = document.getElementById('remoteVideo');
     const statusDiv = document.getElementById('status');
+    const logDiv = document.createElement('div');
+    logDiv.id = 'log';
+    document.body.appendChild(logDiv);
+    const latencyDiv = document.createElement('div');
+    latencyDiv.className = 'latency';
+    document.body.appendChild(latencyDiv);
+
+    // Helper to append log entries
+    function addLog(message) {
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+      logDiv.appendChild(entry);
+      // Auto‑scroll to bottom
+      logDiv.scrollTop = logDiv.scrollHeight;
+    }
 
     // Get local media (camera + mic)
     navigator.mediaDevices.getUserMedia({ video: true, audio: true })
       .then(stream => {
         statusDiv.textContent = '📹 Local media acquired';
+        addLog('Local media stream obtained.');
         localVideo.srcObject = stream;
         stream.getTracks().forEach(track => pc.addTrack(track, stream));
       })
       .catch(err => {
         statusDiv.textContent = '❌ Error accessing media devices';
+        addLog('Error accessing media devices: ' + err);
         console.error(err);
       });
 
     // When remote track arrives, show it
     pc.ontrack = event => {
       remoteVideo.srcObject = event.streams[0];
+      addLog('Remote track received.');
     };
 
     // Send ICE candidates to the other peer via signalling server
     pc.onicecandidate = event => {
       if (event.candidate) {
         socket.emit('signal', { type: 'candidate', candidate: event.candidate });
+        addLog('Sent ICE candidate.');
+      }
+    };
+
+    // Connection state monitoring (helps to know when connection is satisfied)
+    pc.onconnectionstatechange = () => {
+      addLog('PeerConnection state: ' + pc.connectionState);
+      if (pc.connectionState === 'connected') {
+        statusDiv.textContent = '✅ Connection established';
       }
     };
 
@@ -56,23 +87,30 @@
     socket.on('signal', async data => {
       if (data.from === socket.id) return; // ignore own messages
 
+      addLog(`Signal received: ${data.type} from ${data.from}`);
+
       switch (data.type) {
         case 'offer':
           await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+          addLog('Remote offer set.');
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           socket.emit('signal', { type: 'answer', answer });
+          addLog('Answer sent.');
           break;
 
         case 'answer':
           await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+          addLog('Remote answer set.');
           break;
 
         case 'candidate':
           try {
             await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+            addLog('Remote ICE candidate added.');
           } catch (e) {
             console.error('Error adding received ICE candidate', e);
+            addLog('Error adding ICE candidate: ' + e);
           }
           break;
       }
@@ -83,7 +121,29 @@
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       socket.emit('signal', { type: 'offer', offer });
+      addLog('Offer created and sent.');
     }, 3000);
+
+    // ---------- Latency measurement ----------
+    // Send a ping every 5 seconds; server will reply with the same timestamp.
+    function sendPing() {
+      const now = Date.now();
+      socket.emit('ping', { time: now });
+    }
+
+    socket.on('pong', data => {
+      const latency = Date.now() - data.time;
+      latencyDiv.textContent = `Current latency: ${latency} ms`;
+      addLog(`Latency measured: ${latency} ms`);
+    });
+
+    // Start the ping loop
+    setInterval(sendPing, 5000);
+    // Initial ping immediately after connection
+    socket.on('connect', () => {
+      addLog('Socket.io connected, id: ' + socket.id);
+      sendPing();
+    });
   </script>
 </body>
 </html>

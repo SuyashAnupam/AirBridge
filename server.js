@@ -5,7 +5,11 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+  // Reduce default ping interval to keep connection health tight (helps latency)
+  pingInterval: 10000,
+  pingTimeout: 5000,
+});
 
 const PORT = process.env.PORT || 3000;
 
@@ -18,11 +22,18 @@ io.on('connection', (socket) => {
 
   // Forward any signalling data (offer, answer, ICE candidates) to all other peers
   socket.on('signal', (data) => {
+    console.log(`🔄 Signal (${data.type}) from ${socket.id}`);
     // Broadcast to every socket except the sender
     socket.broadcast.emit('signal', {
       from: socket.id,
       ...data,
     });
+  });
+
+  // Simple ping‑pong for latency measurement
+  socket.on('ping', (payload) => {
+    // Echo back the same timestamp
+    socket.emit('pong', payload);
   });
 
   socket.on('disconnect', () => {
