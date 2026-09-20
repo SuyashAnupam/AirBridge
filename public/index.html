@@ -4,18 +4,79 @@
   <meta charset="UTF-8">
   <title>Simple WebRTC Chat (Same Wi‑Fi)</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; }
-    video { width: 45%; margin: 5px; background: #000; }
-    #status { margin-top: 10px; color: #555; }
-    #log { margin-top: 15px; max-height: 150px; overflow-y: auto; background:#f9f9f9; padding:10px; border:1px solid #ddd; font-size:0.9em; }
-    .log-entry { margin-bottom:4px; }
-    .latency { margin-top:10px; color:#006400; }
-    #chatContainer { margin-top:20px; }
-    #chatMessages { list-style:none; padding:0; max-height:150px; overflow-y:auto; background:#eef; padding:5px; border:1px solid #ccc; }
-    #chatMessages li { margin-bottom:4px; }
-    #chatForm { display:flex; margin-top:5px; }
-    #chatInput { flex:1; padding:5px; }
-    #sendBtn { padding:5px 10px; }
+    /* Dark‑mode base */
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background-color: #121212;
+      color: #e0e0e0;
+    }
+    h2, h3 {
+      color: #fafafa;
+    }
+    video {
+      width: 45%;
+      margin: 5px;
+      background: #000;
+      border: 2px solid #444;
+    }
+    #status {
+      margin-top: 10px;
+      color: #bbbbbb;
+    }
+    #log {
+      margin-top: 15px;
+      max-height: 150px;
+      overflow-y: auto;
+      background: #1e1e1e;
+      padding: 10px;
+      border: 1px solid #333;
+      font-size: 0.9em;
+      color: #cfcfcf;
+    }
+    .log-entry {
+      margin-bottom: 4px;
+    }
+    .latency {
+      margin-top: 10px;
+      color: #90ee90;
+    }
+    #chatContainer {
+      margin-top: 20px;
+    }
+    #chatMessages {
+      list-style: none;
+      padding: 5px;
+      max-height: 150px;
+      overflow-y: auto;
+      background: #2a2a2a;
+      border: 1px solid #444;
+      color: #e0e0e0;
+    }
+    #chatMessages li {
+      margin-bottom: 4px;
+    }
+    #chatForm {
+      display: flex;
+      margin-top: 5px;
+    }
+    #chatInput {
+      flex: 1;
+      padding: 5px;
+      background: #333;
+      border: 1px solid #555;
+      color: #e0e0e0;
+    }
+    #sendBtn {
+      padding: 5px 10px;
+      background: #555;
+      border: 1px solid #777;
+      color: #fafafa;
+      cursor: pointer;
+    }
+    #sendBtn:hover {
+      background: #666;
+    }
   </style>
 </head>
 <body>
